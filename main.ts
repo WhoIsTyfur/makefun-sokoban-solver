@@ -67,7 +67,7 @@ function solveLevel(text: string): string {
     throw new Error("no walk");
   }
 
-  type Plan = { pushes: [number, number][]; exitOk: boolean; hall: number; door: number };
+  type Plan = { pushes: [number, number][]; safe: [number, number][]; exitOk: boolean; hall: number; door: number };
   const plans: Plan[] = [];
 
   for (const cells of rooms) {
@@ -124,7 +124,9 @@ function solveLevel(text: string): string {
     const solved = (bs: number[]) => bs.every((b) => goal[b]);
     add(boxes0.slice().sort((a, b) => a - b), hall, -1, [0, 0]);
     let level = [0], found = -1, foundExit = -1;
-    while (level.length && found < 0) {
+    // stop at the optimum if an exit-safe finish exists there; otherwise go on
+    // (bounded by work) for the shortest exit-safe finish as a fallback plan
+    while (level.length && foundExit < 0 && sBoxes.length < 2000000) {
       for (const s of level) {
         if (solved(sBoxes[s])) {
           if (found < 0) found = s;
@@ -132,7 +134,7 @@ function solveLevel(text: string): string {
           if (reg.includes(hall) && foundExit < 0) foundExit = s;
         }
       }
-      if (found >= 0) break;
+      if (foundExit >= 0) break;
       const next: number[] = [];
       for (const s of level) {
         const bs = sBoxes[s];
@@ -156,17 +158,24 @@ function solveLevel(text: string): string {
       level = next;
     }
     if (found < 0) continue;
-    const end = foundExit >= 0 ? foundExit : found;
-    const pushes: [number, number][] = [];
-    for (let s = end; sParent[s] >= 0; s = sParent[s]) pushes.unshift(sPush[s]);
-    plans.push({ pushes, exitOk: foundExit >= 0, hall, door });
+    const trace = (end: number) => {
+      const p: [number, number][] = [];
+      for (let s = end; sParent[s] >= 0; s = sParent[s]) p.unshift(sPush[s]);
+      return p;
+    };
+    const opt = trace(found);
+    const safe = foundExit >= 0 ? trace(foundExit) : opt;
+    plans.push({ pushes: opt, safe, exitOk: foundExit >= 0 && safe.length === opt.length, hall, door });
   }
 
-  // rooms whose finish leaves the door open go first
+  // rooms whose optimal finish leaves the door open go first; one room that
+  // cannot do so goes last with its optimal plan, any others use exit-safe plans
   plans.sort((a, b) => Number(b.exitOk) - Number(a.exitOk));
   let out = "";
-  for (const pl of plans) {
-    for (const [b, d] of pl.pushes) {
+  for (let k = 0; k < plans.length; k++) {
+    const pl = plans[k];
+    const seq = pl.exitOk || k === plans.length - 1 ? pl.pushes : pl.safe;
+    for (const [b, d] of seq) {
       out += walk(player, b - D[d]);
       out += L[d].toUpperCase();
       box[b] = 0; box[b + D[d]] = 1; player = b;
